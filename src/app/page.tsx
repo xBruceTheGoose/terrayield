@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
+import { Transaction, Connection } from '@solana/web3.js'
 
 interface ApyEntry {
   protocol: string
@@ -81,6 +82,35 @@ interface ExecutionResult {
     instructions: DecodedInstruction[]
   }
   success: boolean
+}
+
+interface InjectedSolanaProvider {
+  isPhantom?: boolean
+  isSolflare?: boolean
+  isBackpack?: boolean
+  publicKey?: { toString: () => string }
+  connect: (options?: { onlyIfTrusted?: boolean }) => Promise<{ publicKey: { toString: () => string } }>
+  disconnect: () => Promise<void>
+  signTransaction?: (transaction: Transaction) => Promise<Transaction>
+  signAndSendTransaction?: (
+    transaction: Transaction,
+    options?: { minContextSlot?: number }
+  ) => Promise<{ signature: string }>
+}
+
+const getInjectedSolanaProvider = (): InjectedSolanaProvider | null => {
+  if (typeof window === 'undefined') return null
+  const win = window as unknown as {
+    phantom?: { solana?: InjectedSolanaProvider }
+    solflare?: InjectedSolanaProvider
+    backpack?: InjectedSolanaProvider
+    solana?: InjectedSolanaProvider
+  }
+  if (win.phantom?.solana?.isPhantom) return win.phantom.solana
+  if (win.solflare?.isSolflare) return win.solflare
+  if (win.backpack?.isBackpack) return win.backpack
+  if (win.solana) return win.solana
+  return null
 }
 
 type FootprintPresetId = 'low' | 'average' | 'frequent_traveler' | 'custom'
@@ -378,6 +408,51 @@ export default function Home() {
         setApys(data.execution.live_apys)
         setLastOracleSync(new Date().toLocaleTimeString())
       }
+
+      // If submitted via wallet or blink AND an injected wallet provider is present:
+      const provider = getInjectedSolanaProvider()
+      const isSimulatedAccount =
+        !params.account || params.account === '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU'
+
+      if (params.via && provider && !isSimulatedAccount && data.transaction) {
+        try {
+          // Decode the base64 transaction built by the server
+          const binaryString = window.atob(data.transaction)
+          const bytes = new Uint8Array(binaryString.length)
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i)
+          }
+          const transaction = Transaction.from(bytes)
+
+          let txSignature = ''
+          if (typeof provider.signAndSendTransaction === 'function') {
+            // Prompts Phantom / Solflare / Backpack popup window!
+            const res = await provider.signAndSendTransaction(transaction)
+            txSignature = res.signature
+          } else if (typeof provider.signTransaction === 'function') {
+            const signedTx = await provider.signTransaction(transaction)
+            const connection = new Connection('https://api.devnet.solana.com', 'confirmed')
+            txSignature = await connection.sendRawTransaction(signedTx.serialize(), {
+              skipPreflight: true,
+            })
+          }
+
+          if (txSignature && data.execution) {
+            data.execution.transaction_signatures.yield_deposit = txSignature
+          }
+        } catch (walletErr: unknown) {
+          const wMsg = walletErr instanceof Error ? walletErr.message : String(walletErr)
+          const isUserRejected =
+            wMsg.toLowerCase().includes('reject') ||
+            wMsg.toLowerCase().includes('cancel') ||
+            (walletErr as { code?: number })?.code === 4001
+          if (isUserRejected) {
+            throw new Error('Transaction cancelled in wallet extension.')
+          }
+          throw new Error(`Wallet extension signing failed: ${wMsg}`)
+        }
+      }
+
       setResult(data.execution)
       if (params.via) {
         setSubmittedVia(params.via)
@@ -395,35 +470,40 @@ export default function Home() {
 
   const connectSolanaWallet = async (): Promise<string> => {
     setError(null)
-    try {
-      const win = typeof window !== 'undefined' ? (window as unknown as {
-        solana?: {
-          isPhantom?: boolean
-          isSolflare?: boolean
-          connect: () => Promise<{ publicKey: { toString: () => string } }>
-        }
-      }) : undefined
-
-      if (win?.solana && typeof win.solana.connect === 'function') {
-        const resp = await win.solana.connect()
-        const pubkey = resp.publicKey.toString()
-        setWalletAddress(pubkey)
-        setWalletProviderName(
-          win.solana.isPhantom
+    const provider = getInjectedSolanaProvider()
+    if (provider && typeof provider.connect === 'function') {
+      try {
+        const resp = await provider.connect()
+        const pubkey = resp?.publicKey?.toString() || provider.publicKey?.toString()
+        if (pubkey) {
+          setWalletAddress(pubkey)
+          const name = provider.isPhantom
             ? 'Phantom Wallet'
-            : win.solana.isSolflare
+            : provider.isSolflare
               ? 'Solflare Wallet'
-              : 'Injected Solana Wallet'
-        )
-        return pubkey
+              : provider.isBackpack
+                ? 'Backpack Wallet'
+                : 'Injected Solana Wallet'
+          setWalletProviderName(name)
+          return pubkey
+        }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err)
+        if (
+          message.toLowerCase().includes('reject') ||
+          message.toLowerCase().includes('cancel') ||
+          (err as { code?: number })?.code === 4001
+        ) {
+          setError('Wallet connection cancelled by user.')
+          throw err
+        }
+        console.warn('Injected wallet connection failed, falling back:', err)
       }
-    } catch {
-      // Fall through to built-in Devnet Signer if browser extension rejects or isn't present
     }
 
     const demoDevnetPubkey = '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU'
     setWalletAddress(demoDevnetPubkey)
-    setWalletProviderName('Solana Devnet Signer')
+    setWalletProviderName('Solana Devnet Signer (Simulation)')
     return demoDevnetPubkey
   }
 
@@ -1612,8 +1692,14 @@ export default function Home() {
             </div>
 
             <div className="rounded-2xl border border-slate-700 bg-slate-900 overflow-hidden shadow-2xl">
-              <div className="h-40 bg-gradient-to-br from-emerald-900 via-teal-950 to-slate-950 flex flex-col items-center justify-center p-6 text-center border-b border-slate-800">
-                <span className="text-5xl mb-2" aria-hidden="true">🌍</span>
+              <div className="h-44 bg-gradient-to-br from-emerald-900 via-teal-950 to-slate-950 flex flex-col items-center justify-center p-6 text-center border-b border-slate-800">
+                <Image
+                  src="/logo.png"
+                  alt="TerraYield Logo"
+                  width={48}
+                  height={48}
+                  className="w-12 h-12 object-contain mb-2"
+                />
                 <span className="text-xs uppercase tracking-wider font-bold text-emerald-400">
                   TerraYield • Carbon-Neutral DeFi Blink
                 </span>
@@ -1674,6 +1760,9 @@ export default function Home() {
                       🌐 Open on dial.to ↗
                     </a>
                   </div>
+                  <p className="text-[10px] text-slate-500 text-center leading-normal pt-0.5">
+                    Note: dial.to requires a publicly accessible HTTPS domain. In local dev, click the submit button above or expose via tunnel/deployment.
+                  </p>
                 </div>
 
                 {result && txStatus === 'submitted' && (

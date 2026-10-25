@@ -14,13 +14,19 @@ import {
 } from '@/schemas/terrayield'
 import { z } from 'zod'
 
+const ACTION_HEADERS = {
+  ...ACTIONS_CORS_HEADERS,
+  'x-action-version': '2.1.3',
+  'x-blockchain-ids': 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1,solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+}
+
 /**
  * OPTIONS /api/actions/terrayield
  * Preflight handler required by Solana Actions specification for CORS.
  */
 export async function OPTIONS() {
   return new Response(null, {
-    headers: ACTIONS_CORS_HEADERS,
+    headers: ACTION_HEADERS,
   })
 }
 
@@ -39,22 +45,28 @@ export async function GET(request: NextRequest) {
   const presetMonths = url.searchParams.get('timeframe_months') || '1'
   const presetDiversify = url.searchParams.get('diversify_positions') || 'true'
 
+  const isLocalhost = url.hostname === 'localhost' || url.hostname === '127.0.0.1'
+  const iconUrl = isLocalhost
+    ? 'https://raw.githubusercontent.com/xBruceTheGoose/terrayield/main/public/logo-full.png'
+    : new URL('/logo-full.png', request.url).toString()
+
   const payload = {
+    type: 'action',
     title: 'TerraYield: AI Eco-Arbitrage Middleware',
-    icon: 'https://raw.githubusercontent.com/solana-labs/blinks/main/icons/earth.png',
+    icon: iconUrl,
     description: `Real-time Solana DeFi yield routing middleware (Top Live Rate: ${topProtocol.protocol} @ ${topProtocol.apy}% APY). Pre-commits a % of withdrawal yield to buy & burn tokenized carbon credits.`,
     label: 'Execute TerraYield',
     links: {
       actions: [
         {
-          type: 'post',
+          type: 'transaction',
           label: `Quick Route $${presetLiquidity} USDC (${presetOffsetPct}% Yield Pre-Commit)`,
           href: `/api/actions/terrayield?total_liquidity=${presetLiquidity}&carbon_footprint_kg=${presetFootprint}&offset_yield_percent=${presetOffsetPct}&timeframe_months=${presetMonths}&diversify_positions=${presetDiversify}`,
         },
         {
-          type: 'post',
+          type: 'transaction',
           label: 'Custom Eco-Yield Route',
-          href: '/api/actions/terrayield',
+          href: '/api/actions/terrayield?total_liquidity={total_liquidity}&carbon_footprint_kg={carbon_footprint_kg}&offset_yield_percent={offset_yield_percent}&timeframe_months={timeframe_months}',
           parameters: [
             {
               name: 'total_liquidity',
@@ -92,7 +104,7 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.json(payload, {
-    headers: ACTIONS_CORS_HEADERS,
+    headers: ACTION_HEADERS,
   })
 }
 
@@ -301,7 +313,7 @@ RATIONALE: ${validatedExecution.reasoning_log}`
     }
 
     return NextResponse.json(responsePayload, {
-      headers: ACTIONS_CORS_HEADERS,
+      headers: ACTION_HEADERS,
     })
   } catch (error) {
     console.error('[TerraYield API] Error:', error)
@@ -309,20 +321,20 @@ RATIONALE: ${validatedExecution.reasoning_log}`
     if (error instanceof z.ZodError) {
       return NextResponse.json(
         { error: 'Validation error', details: error.errors },
-        { status: 400, headers: ACTIONS_CORS_HEADERS }
+        { status: 400, headers: ACTION_HEADERS }
       )
     }
 
     if (error instanceof Error) {
       return NextResponse.json(
         { error: error.message },
-        { status: 500, headers: ACTIONS_CORS_HEADERS }
+        { status: 500, headers: ACTION_HEADERS }
       )
     }
 
     return NextResponse.json(
       { error: 'Internal server error' },
-      { status: 500, headers: ACTIONS_CORS_HEADERS }
+      { status: 500, headers: ACTION_HEADERS }
     )
   }
 }

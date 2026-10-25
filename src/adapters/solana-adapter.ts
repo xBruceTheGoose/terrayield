@@ -175,13 +175,14 @@ export class SolanaWeb3Adapter implements ExecutionAdapter {
       dataUtf8: string
     }[]
   }> {
-    let blockhash = params.recentBlockhash || '11111111111111111111111111111111'
-    if (!params.recentBlockhash && process.env.SOLANA_RPC_URL) {
+    let blockhash = params.recentBlockhash
+    if (!blockhash) {
       try {
-        const latest = await this.connection.getLatestBlockhash()
+        const latest = await this.connection.getLatestBlockhash('confirmed')
         blockhash = latest.blockhash
-      } catch {
-        // Use fallback simulation blockhash
+      } catch (err) {
+        console.warn('[SolanaWeb3Adapter] Using fallback simulation blockhash:', err)
+        blockhash = '11111111111111111111111111111111'
       }
     }
 
