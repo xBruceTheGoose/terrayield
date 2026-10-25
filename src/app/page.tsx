@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
+import Image from 'next/image'
 
 interface ApyEntry {
   protocol: string
@@ -554,7 +555,14 @@ export default function Home() {
         <header className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-800 pb-5">
           <div className="space-y-1">
             <div className="flex items-center gap-3">
-              <span className="text-3xl" aria-hidden="true">🌱</span>
+              <Image
+                src="/logo.png"
+                alt="TerraYield Logo"
+                width={36}
+                height={36}
+                className="w-9 h-9 object-contain"
+                priority
+              />
               <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-400 bg-clip-text text-transparent">
                 TerraYield
               </h1>
