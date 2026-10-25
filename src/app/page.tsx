@@ -830,11 +830,22 @@ export default function Home() {
                         name="total_liquidity"
                         type="number"
                         min="1"
-                        step="50"
-                        value={totalLiquidity}
+                        step="any"
+                        value={totalLiquidity === 0 ? '' : totalLiquidity}
                         onChange={(e) => {
                           setError(null)
-                          setTotalLiquidity(Math.max(1, Number(e.target.value) || 0))
+                          const val = e.target.value
+                          if (val === '') {
+                            setTotalLiquidity(0)
+                          } else {
+                            const parsed = Number(val)
+                            setTotalLiquidity(isNaN(parsed) ? 0 : parsed)
+                          }
+                        }}
+                        onBlur={() => {
+                          if (totalLiquidity < 1) {
+                            setTotalLiquidity(1)
+                          }
                         }}
                         aria-describedby="principal-help"
                         className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-mono text-sm focus:outline-none focus:border-cyan-500"
